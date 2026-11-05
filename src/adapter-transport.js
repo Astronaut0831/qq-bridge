@@ -14,10 +14,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
+import { SnowLumaWebSocketClient, message, text } from '@snowluma/sdk';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_FILE = process.env.QQ_BRIDGE_CONFIG || path.join(ROOT, 'config.json');
+const STATUS_FILE = path.join(ROOT, 'state', 'adapter-transport-status.json');
+
+function writeStatus(value) {
+  try {
+    fs.mkdirSync(path.dirname(STATUS_FILE), { recursive: true });
+    fs.writeFileSync(STATUS_FILE, JSON.stringify({ at: Date.now(), ...value }, null, 2), 'utf8');
+  } catch { /* status must not kill the bridge */ }
+}
 
 function log(...args) {
   const line = new Date().toISOString().slice(11, 19) + ' ' + args.map(String).join(' ');
@@ -130,6 +138,7 @@ async function main() {
   const { snowluma, adapter } = readConfig();
   if (!snowluma.wsUrl) throw new Error('missing snowluma.wsUrl');
   if (!adapter.baseUrl) throw new Error('missing adapter.baseUrl');
+  writeStatus({ connected: false, starting: true, adapter: adapter.baseUrl, snowluma: snowluma.wsUrl });
 
   const bot = new SnowLumaWebSocketClient({
     url: snowluma.wsUrl,
@@ -153,9 +162,11 @@ async function main() {
         } catch (e) { log('[media:error]', e.message); }
       }
       log('[in]', kind, payload.chat_id, payload.sender_name, payload.text.slice(0, 40));
+      writeStatus({ connected: true, lastInboundAt: Date.now(), lastChat: payload.chat_id, lastChatType: payload.chat_type });
       await adapterCall(adapter, '/webhook/qq', { method: 'POST', body: JSON.stringify(payload) });
     } catch (e) {
       log('[in:error]', e && e.message || e);
+      writeStatus({ connected: true, lastErrorAt: Date.now(), lastError: 'in: ' + String(e && e.message || e) });
     }
   }
 
@@ -163,16 +174,24 @@ async function main() {
   bot.onPrivateMessage(async (event) => onMessage('private', event));
   bot.on('open', async () => {
     log('[snowluma] connected', bot.url || snowluma.wsUrl);
+    writeStatus({ connected: true, connectedAt: Date.now() });
     try {
       const login = await bot.getLoginInfo();
       selfId = String(login && login.user_id || '');
       log('[snowluma] login', login && login.nickname || '?', selfId || '?');
+      writeStatus({ connected: true, selfId, nickname: login && login.nickname || '' });
     } catch (e) {
       log('[snowluma:login:error]', e && e.message || e);
     }
   });
-  bot.on('close', (info) => log('[snowluma] closed', info && info.code || '?'));
-  bot.on('error', (e) => log('[snowluma:error]', e && e.message || e));
+  bot.on('close', (info) => {
+    log('[snowluma] closed', info && info.code || '?');
+    writeStatus({ connected: false, lastCloseAt: Date.now(), lastCloseCode: info && info.code || null });
+  });
+  bot.on('error', (e) => {
+    log('[snowluma:error]', e && e.message || e);
+    writeStatus({ connected: false, lastErrorAt: Date.now(), lastError: 'ws: ' + String(e && e.message || e) });
+  });
 
   setInterval(async () => {
     if (outboxBusy) return;
@@ -184,16 +203,22 @@ async function main() {
       const done = [];
       for (const item of items) {
         try {
-          const content = String(item.text || '');
-          if (!content.trim()) { done.push(item.id); continue; }
           const id = Number(item.chatId);
           if (!Number.isSafeInteger(id) || id <= 0) throw new Error('bad chatId ' + item.chatId);
-          if (item.chatType === 'group') await bot.sendGroupMessage(id, text(content));
-          else await bot.sendPrivateMessage(id, text(content));
+          const content = String(item.text || '');
+          const file = String(item.file || '');
+          const chain = file && item.kind === 'image'
+            ? (content ? text(content).image(file) : message.image(file))
+            : text(content);
+          if (!content.trim() && !(file && item.kind === 'image')) { done.push(item.id); continue; }
+          if (item.chatType === 'group') await bot.sendGroupMessage(id, chain);
+          else await bot.sendPrivateMessage(id, chain);
           done.push(item.id);
-          log('[out]', item.chatType, item.chatId, content.slice(0, 40));
+          log('[out]', item.chatType, item.chatId, (content || file).slice(0, 40));
+          writeStatus({ connected: true, lastOutboundAt: Date.now() });
         } catch (e) {
           log('[out:error]', item.id, e && e.message || e);
+          writeStatus({ connected: true, lastErrorAt: Date.now(), lastError: 'out: ' + String(e && e.message || e) });
         }
       }
       if (done.length) await adapterCall(adapter, '/api/bridge/outbox/ack', { method: 'POST', body: JSON.stringify({ ids: done }) });
