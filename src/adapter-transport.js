@@ -148,10 +148,11 @@ async function adapterCall(adapter, pathname, options = {}) {
 }
 
 async function main() {
-  const { snowluma, adapter, access } = readConfig();
+  const { snowluma, adapter, access: configuredAccess } = readConfig();
   if (!snowluma.wsUrl) throw new Error('missing snowluma.wsUrl');
   if (!adapter.baseUrl) throw new Error('missing adapter.baseUrl');
-  writeStatus({ connected: false, starting: true, adapter: adapter.baseUrl, snowluma: snowluma.wsUrl, access });
+  let currentAccess = configuredAccess;
+  writeStatus({ connected: false, starting: true, adapter: adapter.baseUrl, snowluma: snowluma.wsUrl, access: currentAccess });
 
   const bot = new SnowLumaWebSocketClient({
     url: snowluma.wsUrl,
@@ -161,14 +162,41 @@ async function main() {
   let selfId = '';
   let outboxBusy = false;
 
+  async function refreshAccess() {
+    try {
+      const d = await adapterCall(adapter, '/api/platforms/access?platform=qq');
+      if (d && d.access) {
+        currentAccess = {
+          allowAllGroups: d.access.allowAllGroups === true,
+          groups: Array.isArray(d.access.groups) ? d.access.groups.map(String) : [],
+          privates: Array.isArray(d.access.privates) ? d.access.privates.map(String) : [],
+        };
+        writeStatus({ connected: true, access: currentAccess });
+      }
+    } catch (e) {
+      log('[access:error]', e && e.message || e);
+    }
+  }
+  await refreshAccess();
+  setInterval(() => { void refreshAccess(); }, 5000);
+
   async function onMessage(kind, event) {
     if (!event) return;
     if (String(event.user_id || '') === String(selfId || event.self_id || '')) return;
     try {
       const payload = normalizeEvent(event, kind, selfId);
       if (!payload.chat_id || !payload.msg_id) return;
-      if (!isAllowed(payload, access)) {
+      if (!isAllowed(payload, currentAccess)) {
         log('[skip]', payload.chat_type, payload.chat_id, 'not in allowlist');
+        void adapterCall(adapter, '/api/platforms/seen', {
+          method: 'POST',
+          body: JSON.stringify({
+            platform: 'qq',
+            chatType: payload.chat_type,
+            chatId: payload.chat_id,
+            name: String(event.group_name || event.sender?.card || event.sender?.nickname || payload.chat_id),
+          }),
+        }).catch(() => {});
         return;
       }
       const img = firstImage(event.message);
