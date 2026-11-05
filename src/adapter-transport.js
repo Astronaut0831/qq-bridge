@@ -207,6 +207,15 @@ async function main() {
           if (!Number.isSafeInteger(id) || id <= 0) throw new Error('bad chatId ' + item.chatId);
           const content = String(item.text || '');
           const file = String(item.file || '');
+          if (item.kind === 'file' && file) {
+            if (!fs.existsSync(file)) throw new Error('file missing: ' + file);
+            if (item.chatType === 'group') await bot.uploadGroupFile(id, file);
+            else await bot.uploadPrivateFile(id, file);
+            done.push(item.id);
+            log('[out]', item.chatType, item.chatId, 'file=' + path.basename(file));
+            writeStatus({ connected: true, lastOutboundAt: Date.now() });
+            continue;
+          }
           const chain = file && item.kind === 'image'
             ? (content ? text(content).image(file) : message.image(file))
             : text(content);
