@@ -64,17 +64,15 @@ Copy-Item config.example.json config.json
 
 ### 接入白名单（默认拒绝）
 
-transport 默认不转发任何消息；必须显式填：
+接入名单由 **platform-adapter 统一管理**，推荐在控制台操作：
 
-```json
-"access": {
-  "allowAllGroups": false,
-  "groups": ["群号1", "群号2"],
-  "privates": ["QQ号1"]
-}
+```text
+http://127.0.0.1:3100 → 接入 → QQ
 ```
 
-`groups` 是 QQ 群号，`privates` 是允许私聊的 QQ 号。不要为了省事打开 `allowAllGroups`，SnowLuma 会收到该账号所有群的消息。
+transport 每 5 秒从 `/api/platforms/access?platform=qq` 拉取。未批准的群/私聊只上报 pending，不送 adapter。
+
+`config.json` 里的 `access` 仅作为 adapter 不可用时的 fallback。不要为了省事打开 `allowAllGroups`，SnowLuma 会收到该账号所有群的消息。
 
 ## 3. 启动
 
