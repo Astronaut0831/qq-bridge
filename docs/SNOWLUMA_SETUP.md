@@ -62,6 +62,20 @@ Copy-Item config.example.json config.json
 
 `adapter.token` 来自 platform-adapter 当前 webhook token。改名完成后字段会统一迁移。
 
+### 接入白名单（默认拒绝）
+
+transport 默认不转发任何消息；必须显式填：
+
+```json
+"access": {
+  "allowAllGroups": false,
+  "groups": ["群号1", "群号2"],
+  "privates": ["QQ号1"]
+}
+```
+
+`groups` 是 QQ 群号，`privates` 是允许私聊的 QQ 号。不要为了省事打开 `allowAllGroups`，SnowLuma 会收到该账号所有群的消息。
+
 ## 3. 启动
 
 ```powershell

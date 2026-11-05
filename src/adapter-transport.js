@@ -44,7 +44,20 @@ function readConfig() {
       pollMs: Math.max(300, Number(a.pollMs) || 1200),
       maxImageBytes: Math.max(1024 * 1024, Number(a.maxImageBytes) || 10 * 1024 * 1024),
     },
+    access: {
+      allowAllGroups: c.access?.allowAllGroups === true,
+      groups: Array.isArray(c.access?.groups) ? c.access.groups.map(String) : [],
+      privates: Array.isArray(c.access?.privates) ? c.access.privates.map(String) : [],
+    },
   };
+}
+
+function isAllowed(payload, access) {
+  if (payload.chat_type === 'group') {
+    if (access.allowAllGroups) return true;
+    return access.groups.includes(String(payload.chat_id));
+  }
+  return access.privates.includes(String(payload.sender_id));
 }
 
 function segmentText(message) {
@@ -135,10 +148,10 @@ async function adapterCall(adapter, pathname, options = {}) {
 }
 
 async function main() {
-  const { snowluma, adapter } = readConfig();
+  const { snowluma, adapter, access } = readConfig();
   if (!snowluma.wsUrl) throw new Error('missing snowluma.wsUrl');
   if (!adapter.baseUrl) throw new Error('missing adapter.baseUrl');
-  writeStatus({ connected: false, starting: true, adapter: adapter.baseUrl, snowluma: snowluma.wsUrl });
+  writeStatus({ connected: false, starting: true, adapter: adapter.baseUrl, snowluma: snowluma.wsUrl, access });
 
   const bot = new SnowLumaWebSocketClient({
     url: snowluma.wsUrl,
@@ -154,6 +167,10 @@ async function main() {
     try {
       const payload = normalizeEvent(event, kind, selfId);
       if (!payload.chat_id || !payload.msg_id) return;
+      if (!isAllowed(payload, access)) {
+        log('[skip]', payload.chat_type, payload.chat_id, 'not in allowlist');
+        return;
+      }
       const img = firstImage(event.message);
       if (img) {
         try {
