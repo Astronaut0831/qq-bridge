@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient, message, text } from '@snowluma/sdk';
+import { discoverSnowLumaConnection } from './snowluma-conn.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_FILE = process.env.QQ_BRIDGE_CONFIG || path.join(ROOT, 'config.json');
@@ -153,12 +154,28 @@ async function main() {
   const { snowluma, adapter, access: configuredAccess } = readConfig();
   if (!snowluma.wsUrl) throw new Error('missing snowluma.wsUrl');
   if (!adapter.baseUrl) throw new Error('missing adapter.baseUrl');
+
+  let activeSnowluma = { ...snowluma };
+  try {
+    if (snowluma.homeDir) {
+      const found = await discoverSnowLumaConnection({ cfg: { snowluma } });
+      if (found.ok && found.wsUrl && found.wsToken) {
+        activeSnowluma = { ...activeSnowluma, wsUrl: found.wsUrl, accessToken: found.wsToken };
+        log('[snowluma] discovered', found.source, found.self?.user_id || '');
+      } else if (!found.ok) {
+        log('[snowluma:discovery]', found.error || 'not found');
+      }
+    }
+  } catch (e) {
+    log('[snowluma:discovery:error]', e && e.message || e);
+  }
+
   let currentAccess = configuredAccess;
-  writeStatus({ connected: false, starting: true, adapter: adapter.baseUrl, snowluma: snowluma.wsUrl, access: currentAccess });
+  writeStatus({ connected: false, starting: true, adapter: adapter.baseUrl, snowluma: activeSnowluma.wsUrl, access: currentAccess });
 
   const bot = new SnowLumaWebSocketClient({
-    url: snowluma.wsUrl,
-    accessToken: snowluma.accessToken || undefined,
+    url: activeSnowluma.wsUrl,
+    accessToken: activeSnowluma.accessToken || undefined,
     reconnect: true,
   });
   let selfId = '';
@@ -173,7 +190,7 @@ async function main() {
           groups: Array.isArray(d.access.groups) ? d.access.groups.map(String) : [],
           privates: Array.isArray(d.access.privates) ? d.access.privates.map(String) : [],
         };
-        writeStatus({ connected: true, access: currentAccess });
+        writeStatus({ access: currentAccess });
       }
     } catch (e) {
       log('[access:error]', e && e.message || e);
