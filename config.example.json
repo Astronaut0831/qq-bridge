@@ -1,4 +1,10 @@
 {
+  "adapter": {
+    "baseUrl": "http://127.0.0.1:8788",
+    "token": "",
+    "pollMs": 1200,
+    "maxImageBytes": 10485760
+  },
   "dsh": {
     "baseUrl": "http://127.0.0.1:3080",
     "provider": "deepseek-official",
