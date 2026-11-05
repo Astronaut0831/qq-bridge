@@ -77,8 +77,16 @@ transport 每 5 秒从 `/api/platforms/access?platform=qq` 拉取。未批准的
 ## 3. 启动
 
 ```powershell
-npm run start:transport
+npm start
 ```
+
+`npm start` 默认就是 transport-only；旧的全 agent bridge 仅保留为：
+
+```powershell
+npm run start:legacy
+```
+
+不要同时启动两者。
 
 成功时：
 
