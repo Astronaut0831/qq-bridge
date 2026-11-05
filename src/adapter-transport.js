@@ -19,11 +19,13 @@ import { SnowLumaWebSocketClient, message, text } from '@snowluma/sdk';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_FILE = process.env.QQ_BRIDGE_CONFIG || path.join(ROOT, 'config.json');
 const STATUS_FILE = path.join(ROOT, 'state', 'adapter-transport-status.json');
+let statusState = {};
 
 function writeStatus(value) {
   try {
+    statusState = { ...statusState, ...value, at: Date.now() };
     fs.mkdirSync(path.dirname(STATUS_FILE), { recursive: true });
-    fs.writeFileSync(STATUS_FILE, JSON.stringify({ at: Date.now(), ...value }, null, 2), 'utf8');
+    fs.writeFileSync(STATUS_FILE, JSON.stringify(statusState, null, 2), 'utf8');
   } catch { /* status must not kill the bridge */ }
 }
 
@@ -224,7 +226,7 @@ async function main() {
       const login = await bot.getLoginInfo();
       selfId = String(login && login.user_id || '');
       log('[snowluma] login', login && login.nickname || '?', selfId || '?');
-      writeStatus({ connected: true, selfId, nickname: login && login.nickname || '' });
+      writeStatus({ connected: true, starting: false, selfId, nickname: login && login.nickname || '' });
     } catch (e) {
       log('[snowluma:login:error]', e && e.message || e);
     }
